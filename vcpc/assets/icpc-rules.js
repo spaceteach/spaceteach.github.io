@@ -37,7 +37,7 @@
     });
   }
 
-  function defaults() { return { intro: 0, s5: '', retired: false, wf: [0, 0, 0], autoJudge: false }; }
+  function defaults() { return { intro: 0, s5: '', retired: false, wf: [0, 0, 0], autoJudge: false, autoProxy: false }; }
 
   function ensure(profile) {
     if (!profile) return null;
@@ -47,6 +47,7 @@
     s.s5 = s.s5 === 'done' ? 'done' : '';
     s.retired = !!s.retired;
     s.autoJudge = !!s.autoJudge;
+    s.autoProxy = !!s.autoProxy;
     if (!Array.isArray(s.wf)) s.wf = [0, 0, 0];
     s.wf = [0, 1, 2].map(function (i) { return clamp(Math.round(Number(s.wf[i]) || 0), 0, MAX_WF); });
     if ((profile.season || 1) > MAX_SEASONS) {
@@ -72,7 +73,7 @@
       if (out) {
         var src = raw && raw.icpc;
         out.icpc = src && typeof src === 'object'
-          ? { intro: src.intro, s5: src.s5, retired: src.retired, autoJudge: src.autoJudge, wf: Array.isArray(src.wf) ? src.wf.slice(0, 3) : null }
+          ? { intro: src.intro, s5: src.s5, retired: src.retired, autoJudge: src.autoJudge, autoProxy: src.autoProxy, wf: Array.isArray(src.wf) ? src.wf.slice(0, 3) : null }
           : defaults();
         ensure(out);
       }
@@ -99,7 +100,7 @@
       if (out) {
         var src = data && data.p && data.p.icpc;
         out.icpc = src && typeof src === 'object'
-          ? { intro: src.intro, s5: src.s5, retired: src.retired, autoJudge: src.autoJudge, wf: src.wf }
+          ? { intro: src.intro, s5: src.s5, retired: src.retired, autoJudge: src.autoJudge, autoProxy: src.autoProxy, wf: src.wf }
           : defaults();
         ensure(out);
       }
@@ -434,9 +435,16 @@
   }
 
   // ---- auto judge card proxy ---------------------------------------------
+  function isAutoProxy() {
+    var p = App && App.state && App.state.profile;
+    return !!(p && ensure(p).autoProxy);
+  }
+
   function isAutoGacha() {
     var p = App && App.state && App.state.profile;
-    return !!(p && ensure(p).autoJudge);
+    if (!p) return false;
+    var s = ensure(p);
+    return !!(s.autoProxy || s.autoJudge);
   }
 
   function handleGacha() {
@@ -451,28 +459,95 @@
     if (draw && !draw.hidden && !draw.dataset.icpcAuto) {
       draw.dataset.icpcAuto = '1';
       setTimeout(function () {
-        if (document.body.contains(draw) && !draw.hidden) draw.click();
+        if (isAutoGacha() && document.body.contains(draw) && !draw.hidden) draw.click();
       }, 260);
     } else if (skip && !skip.hidden && !skip.dataset.icpcAuto) {
       skip.dataset.icpcAuto = '1';
       setTimeout(function () {
-        if (document.body.contains(skip) && !skip.hidden) skip.click();
+        if (isAutoGacha() && document.body.contains(skip) && !skip.hidden) skip.click();
       }, 160);
     }
 
     if (close && !close.hidden && !close.dataset.icpcAuto) {
       close.dataset.icpcAuto = '1';
       setTimeout(function () {
-        if (document.body.contains(close) && !close.hidden) close.click();
+        if (isAutoGacha() && document.body.contains(close) && !close.hidden) close.click();
       }, 1400);
     }
+  }
+
+  function handleEvent() {
+    if (!isAutoProxy()) return;
+    var layer = document.querySelector('.modal-layer--event');
+    if (!layer) return;
+
+    var cont = layer.querySelector('[data-ui="event-continue"]');
+    if (cont) {
+      if (!cont.dataset.icpcAuto) {
+        cont.dataset.icpcAuto = '1';
+        setTimeout(function () {
+          if (isAutoProxy() && document.body.contains(cont)) cont.click();
+        }, 1000);
+      }
+      return;
+    }
+
+    var buttons = layer.querySelectorAll('.event-choice');
+    if (!buttons.length) return;
+
+    var p = App && App.state && App.state.contest;
+    var ev = p && p.pendingEvent && p.pendingEvent.event;
+    var idx = ev && ev.choices ? pickBestChoice(ev.choices) : -1;
+    var target = idx >= 0 ? layer.querySelector('.event-choice[data-choice="' + idx + '"]') : null;
+    if (!target) {
+      var safe = layer.querySelector('.event-choice__risk--safe');
+      target = safe ? safe.closest('.event-choice') : null;
+    }
+    if (!target || target.disabled || target.dataset.icpcAuto) return;
+    target.dataset.icpcAuto = '1';
+    setTimeout(function () {
+      if (isAutoProxy() && document.body.contains(target) && !target.disabled) target.click();
+    }, 800);
+  }
+
+  function choiceScore(c) {
+    var outs = (c && c.outcomes) || [];
+    var total = 0, weight = 0;
+    outs.forEach(function (o) {
+      var w = o.weight == null ? 1 : Number(o.weight);
+      var e = o.effect || {};
+      var v = (Number(e.energy) || 0) * 1 +
+        (Number(e.morale) || 0) * 1.2 +
+        (Number(e.insight) || 0) * 0.9 +
+        (Number(e.tp) || 0) * 2.5 +
+        (Number(e.rating) || 0) * 0.6 -
+        (Number(e.time) || 0) * 1.6;
+      total += v * w;
+      weight += w;
+    });
+    return weight ? total / weight : 0;
+  }
+
+  function pickBestChoice(choices) {
+    var rank = { safe: 0, risky: 1, wild: 2 };
+    var best = -1, bestRisk = 99, bestScore = -Infinity;
+    (choices || []).forEach(function (c, i) {
+      var r = rank[c && c.risk] == null ? 2 : rank[c.risk];
+      var s = choiceScore(c);
+      if (r < bestRisk || (r === bestRisk && s > bestScore)) {
+        best = i;
+        bestRisk = r;
+        bestScore = s;
+      }
+    });
+    return best;
   }
 
   var gachaObserver = null;
   function watchGacha() {
     var root = document.getElementById('modal-root');
     if (!root || gachaObserver) return;
-    gachaObserver = new MutationObserver(function () { handleGacha(); });
+    gachaObserver = new MutationObserver(function () { handleGacha(); handleEvent(); });
     gachaObserver.observe(root, {
       childList: true,
       subtree: true,
@@ -480,34 +555,54 @@
       attributeFilter: ['hidden', 'class']
     });
     handleGacha();
+    handleEvent();
+  }
+
+  function makeAutoRow(ui, title, desc, on) {
+    var holder = document.createElement('div');
+    holder.innerHTML = '<button class="settings-row" data-ui="' + ui + '"><span><b>' + title +
+      '</b><small>' + desc + '</small></span><span class="switch' + (on ? ' is-on' : '') + '"></span></button>';
+    return holder.firstElementChild;
+  }
+
+  function toggleFlag(flag, row) {
+    var p = App && App.state && App.state.profile;
+    if (!p) return;
+    var st = ensure(p);
+    st[flag] = !st[flag];
+    persist();
+    var sw = row.querySelector('.switch');
+    if (sw) sw.classList.toggle('is-on', st[flag]);
+    if (flag === 'autoProxy') {
+      UI.toast(st.autoProxy ? '全局代理已开启：自动处理事件与判题卡' : '全局代理已关闭', 'info', 2800);
+      if (st.autoProxy) { handleGacha(); handleEvent(); }
+    } else {
+      UI.toast(st.autoJudge ? '自动抽卡已开启' : '自动抽卡已关闭', 'info', 2600);
+      if (st.autoJudge) handleGacha();
+    }
   }
 
   function injectAutoSetting() {
     var list = document.querySelector('.settings-list');
     if (!list) return;
-    var row = list.querySelector('[data-ui="toggle-auto-gacha"]');
-    if (row) return;
     var p = App && App.state && App.state.profile;
     var st = p ? ensure(p) : null;
-    var motion = list.querySelector('[data-ui="toggle-motion"]');
-    var holder = document.createElement('div');
-    holder.innerHTML = '<button class="settings-row" data-ui="toggle-auto-gacha"><span><b>自动抽卡</b>' +
-      '<small>提交后自动抽取并收下判题卡</small></span><span class="switch' +
-      (st && st.autoJudge ? ' is-on' : '') + '"></span></button>';
-    row = holder.firstElementChild;
-    if (motion && motion.nextSibling) list.insertBefore(row, motion.nextSibling);
-    else list.appendChild(row);
-    row.addEventListener('click', function () {
-      var profile = App && App.state && App.state.profile;
-      if (!profile) return;
-      var s = ensure(profile);
-      s.autoJudge = !s.autoJudge;
-      persist();
-      var sw = row.querySelector('.switch');
-      if (sw) sw.classList.toggle('is-on', s.autoJudge);
-      UI.toast(s.autoJudge ? '自动抽卡已开启' : '自动抽卡已关闭', 'info', 2600);
-      if (s.autoJudge) handleGacha();
-    });
+    var anchor = list.querySelector('[data-ui="toggle-motion"]');
+
+    var judgeRow = list.querySelector('[data-ui="toggle-auto-gacha"]');
+    if (!judgeRow) {
+      judgeRow = makeAutoRow('toggle-auto-gacha', '自动抽卡', '提交后自动抽取并收下判题卡', st && st.autoJudge);
+      if (anchor && anchor.nextSibling) list.insertBefore(judgeRow, anchor.nextSibling);
+      else list.appendChild(judgeRow);
+      judgeRow.addEventListener('click', function () { toggleFlag('autoJudge', judgeRow); });
+    }
+
+    if (!list.querySelector('[data-ui="toggle-auto-proxy"]')) {
+      var proxyRow = makeAutoRow('toggle-auto-proxy', '全局代理', '自动处理事件与判题卡，事件优先稳妥选项', st && st.autoProxy);
+      if (judgeRow.nextSibling) list.insertBefore(proxyRow, judgeRow.nextSibling);
+      else list.appendChild(proxyRow);
+      proxyRow.addEventListener('click', function () { toggleFlag('autoProxy', proxyRow); });
+    }
   }
 
   if (typeof UI.showSettings === 'function') {
@@ -524,13 +619,15 @@
     if (!meta) return;
     var p = App && App.state && App.state.profile;
     var st = p ? ensure(p) : null;
-    var on = !!(st && st.autoJudge && App.state.screen === 'contest');
+    var on = !!(st && (st.autoProxy || st.autoJudge) && App.state.screen === 'contest');
     var el = meta.querySelector('.icpc-auto-badge');
     if (on && !el) {
       el = document.createElement('span');
       el.className = 'icpc-auto-badge';
-      el.textContent = 'AUTO 抽卡';
+      el.textContent = st.autoProxy ? 'AUTO 代理' : 'AUTO 抽卡';
       meta.appendChild(el);
+    } else if (on && el) {
+      el.textContent = st.autoProxy ? 'AUTO 代理' : 'AUTO 抽卡';
     } else if (!on && el) {
       el.remove();
     }
@@ -582,7 +679,9 @@
     maxWf: MAX_WF,
     chance: s5Chance,
     regroupRoster: regroupRoster,
-    autoGacha: handleGacha
+    autoGacha: handleGacha,
+    autoEvent: handleEvent,
+    pickBestChoice: pickBestChoice
   };
 
   console.info('[ICPC] rules patch loaded: ' + MAX_SEASONS + ' seasons, ' + MAX_WF + ' WF per player');
