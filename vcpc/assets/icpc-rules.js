@@ -37,7 +37,7 @@
     });
   }
 
-  function defaults() { return { intro: 0, s5: '', retired: false, wf: [0, 0, 0] }; }
+  function defaults() { return { intro: 0, s5: '', retired: false, wf: [0, 0, 0], autoJudge: false }; }
 
   function ensure(profile) {
     if (!profile) return null;
@@ -46,6 +46,7 @@
     s.intro = Math.max(0, Math.round(Number(s.intro) || 0));
     s.s5 = s.s5 === 'done' ? 'done' : '';
     s.retired = !!s.retired;
+    s.autoJudge = !!s.autoJudge;
     if (!Array.isArray(s.wf)) s.wf = [0, 0, 0];
     s.wf = [0, 1, 2].map(function (i) { return clamp(Math.round(Number(s.wf[i]) || 0), 0, MAX_WF); });
     if ((profile.season || 1) > MAX_SEASONS) {
@@ -71,7 +72,7 @@
       if (out) {
         var src = raw && raw.icpc;
         out.icpc = src && typeof src === 'object'
-          ? { intro: src.intro, s5: src.s5, retired: src.retired, wf: Array.isArray(src.wf) ? src.wf.slice(0, 3) : null }
+          ? { intro: src.intro, s5: src.s5, retired: src.retired, autoJudge: src.autoJudge, wf: Array.isArray(src.wf) ? src.wf.slice(0, 3) : null }
           : defaults();
         ensure(out);
       }
@@ -98,7 +99,7 @@
       if (out) {
         var src = data && data.p && data.p.icpc;
         out.icpc = src && typeof src === 'object'
-          ? { intro: src.intro, s5: src.s5, retired: src.retired, wf: src.wf }
+          ? { intro: src.intro, s5: src.s5, retired: src.retired, autoJudge: src.autoJudge, wf: src.wf }
           : defaults();
         ensure(out);
       }
@@ -185,6 +186,7 @@
       '.icpc-subtitle small{display:block;margin-top:12px;font:500 clamp(11px,1.2vw,14px)/1.6 Lato,"Noto Sans SC",sans-serif;color:rgba(255,255,255,.72);letter-spacing:.22em}',
       '.icpc-badges{margin-top:12px;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;letter-spacing:.12em;color:#767676}',
       '.icpc-badges b{color:#3f8b84}',
+      '.icpc-auto-badge{display:inline-flex;align-items:center;margin-left:10px;padding:3px 8px;border-radius:999px;background:rgba(63,139,132,.12);color:#3f8b84;font-size:10px;font-weight:700;letter-spacing:.12em}',
       '.icpc-regroup .modal__actions{display:flex;flex-direction:column;gap:10px}',
       '.icpc-regroup .btn{width:100%}',
       '.icpc-hint{margin-top:14px;font-size:12px;line-height:1.7;color:#767676}',
@@ -431,6 +433,109 @@
     };
   }
 
+  // ---- auto judge card proxy ---------------------------------------------
+  function isAutoGacha() {
+    var p = App && App.state && App.state.profile;
+    return !!(p && ensure(p).autoJudge);
+  }
+
+  function handleGacha() {
+    if (!isAutoGacha()) return;
+    var layer = document.querySelector('.modal-layer--gacha');
+    if (!layer) return;
+
+    var draw = layer.querySelector('[data-ui="draw-gacha"]');
+    var skip = layer.querySelector('[data-ui="skip-gacha"]');
+    var close = layer.querySelector('[data-ui="close-gacha"]');
+
+    if (draw && !draw.hidden && !draw.dataset.icpcAuto) {
+      draw.dataset.icpcAuto = '1';
+      setTimeout(function () {
+        if (document.body.contains(draw) && !draw.hidden) draw.click();
+      }, 260);
+    } else if (skip && !skip.hidden && !skip.dataset.icpcAuto) {
+      skip.dataset.icpcAuto = '1';
+      setTimeout(function () {
+        if (document.body.contains(skip) && !skip.hidden) skip.click();
+      }, 160);
+    }
+
+    if (close && !close.hidden && !close.dataset.icpcAuto) {
+      close.dataset.icpcAuto = '1';
+      setTimeout(function () {
+        if (document.body.contains(close) && !close.hidden) close.click();
+      }, 1400);
+    }
+  }
+
+  var gachaObserver = null;
+  function watchGacha() {
+    var root = document.getElementById('modal-root');
+    if (!root || gachaObserver) return;
+    gachaObserver = new MutationObserver(function () { handleGacha(); });
+    gachaObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden', 'class']
+    });
+    handleGacha();
+  }
+
+  function injectAutoSetting() {
+    var list = document.querySelector('.settings-list');
+    if (!list) return;
+    var row = list.querySelector('[data-ui="toggle-auto-gacha"]');
+    if (row) return;
+    var p = App && App.state && App.state.profile;
+    var st = p ? ensure(p) : null;
+    var motion = list.querySelector('[data-ui="toggle-motion"]');
+    var holder = document.createElement('div');
+    holder.innerHTML = '<button class="settings-row" data-ui="toggle-auto-gacha"><span><b>自动抽卡</b>' +
+      '<small>提交后自动抽取并收下判题卡</small></span><span class="switch' +
+      (st && st.autoJudge ? ' is-on' : '') + '"></span></button>';
+    row = holder.firstElementChild;
+    if (motion && motion.nextSibling) list.insertBefore(row, motion.nextSibling);
+    else list.appendChild(row);
+    row.addEventListener('click', function () {
+      var profile = App && App.state && App.state.profile;
+      if (!profile) return;
+      var s = ensure(profile);
+      s.autoJudge = !s.autoJudge;
+      persist();
+      var sw = row.querySelector('.switch');
+      if (sw) sw.classList.toggle('is-on', s.autoJudge);
+      UI.toast(s.autoJudge ? '自动抽卡已开启' : '自动抽卡已关闭', 'info', 2600);
+      if (s.autoJudge) handleGacha();
+    });
+  }
+
+  if (typeof UI.showSettings === 'function') {
+    var origSettings = UI.showSettings;
+    UI.showSettings = function () {
+      var res = origSettings.apply(this, arguments);
+      setTimeout(injectAutoSetting, 40);
+      return res;
+    };
+  }
+
+  function addAutoBadge() {
+    var meta = document.getElementById('topbar-meta');
+    if (!meta) return;
+    var p = App && App.state && App.state.profile;
+    var st = p ? ensure(p) : null;
+    var on = !!(st && st.autoJudge && App.state.screen === 'contest');
+    var el = meta.querySelector('.icpc-auto-badge');
+    if (on && !el) {
+      el = document.createElement('span');
+      el.className = 'icpc-auto-badge';
+      el.textContent = 'AUTO 抽卡';
+      meta.appendChild(el);
+    } else if (!on && el) {
+      el.remove();
+    }
+  }
+
   // ---- render hook -------------------------------------------------------
   if (typeof UI.render === 'function') {
     var origRender = UI.render;
@@ -439,6 +544,8 @@
       setTimeout(function () {
         try {
           addHubBadges();
+          addAutoBadge();
+          watchGacha();
           scheduleIntro(600);
           maybeRegroup();
           maybeRetired();
@@ -455,6 +562,8 @@
   function bootCheck() {
     try {
       addHubBadges();
+      addAutoBadge();
+      watchGacha();
       scheduleIntro(700);
       maybeRegroup();
       maybeRetired();
@@ -472,7 +581,8 @@
     seasons: MAX_SEASONS,
     maxWf: MAX_WF,
     chance: s5Chance,
-    regroupRoster: regroupRoster
+    regroupRoster: regroupRoster,
+    autoGacha: handleGacha
   };
 
   console.info('[ICPC] rules patch loaded: ' + MAX_SEASONS + ' seasons, ' + MAX_WF + ' WF per player');
