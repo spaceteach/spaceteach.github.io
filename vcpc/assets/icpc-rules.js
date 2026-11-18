@@ -477,10 +477,10 @@
     };
   }
 
-  // 建队初始评级按学校层次分档：强校下限高、区间窄；新军上下限都放开
+  // 建队初始评级按学校层次分档：越强的学校下限与上限同时更高，新军区间放得最宽
   var TIER_INITIAL = {
-    S: [1000, 1350], A: [900, 1400], B: [780, 1450],
-    C: [650, 1500], D: [500, 1550], INTL: [1000, 1350], X: [500, 1600]
+    S: [1150, 1600], A: [1000, 1550], B: [850, 1500],
+    C: [700, 1420], D: [500, 1320], INTL: [1150, 1600]
   };
 
   function draftTier() {
@@ -492,16 +492,24 @@
     return 'X';
   }
 
+  function defaultRange() {
+    var cfg = V.CONFIG && V.CONFIG.rating ? V.CONFIG.rating : {};
+    var r = cfg.initialRange;
+    return Array.isArray(r) && r.length === 2 ? [Number(r[0]) || 500, Number(r[1]) || 1600] : [500, 1600];
+  }
+
   function tierRange(tier) {
-    return TIER_INITIAL[tier] || TIER_INITIAL.X;
+    return TIER_INITIAL[tier] || defaultRange();
   }
 
   if (Rating && typeof Rating.initialRating === 'function') {
     var origInitialRating = Rating.initialRating;
     Rating.initialRating = function (rng) {
+      var tier = draftTier();
+      if (!TIER_INITIAL[tier]) return origInitialRating.apply(this, arguments);
       var cfg = V.CONFIG && V.CONFIG.rating ? V.CONFIG.rating : {};
       var step = Number(cfg.initialStep) || 25;
-      var band = tierRange(draftTier());
+      var band = TIER_INITIAL[tier];
       var lo = Math.ceil(band[0] / step) * step;
       var hi = Math.floor(band[1] / step) * step;
       if (!rng || typeof rng.int !== 'function') return Math.round((lo + hi) / 2);
@@ -907,9 +915,9 @@
           '<p>网络预选赛未出线时，学校可申请外卡：按网络赛排名优先分配给尚未获得名额的高校。' +
           '顶尖高校名额多、外卡系数低；新军高校系数高，本校从未打进区域赛时另有 <b>×1.7</b> 优先。</p>' +
           '<p>建队时选择的学校决定层次与外卡系数；层次越高，正规渠道晋级越容易，外卡越难。</p>' +
-          '<p>初始评级也随层次分档：顶尖 1000–1350、一流 900–1400、强势 780–1450、中坚 650–1500、' +
-          '新军 500–1550（自定义校 500–1600）。强校下限高、波动小，新军可能极低也可能捡到天才，' +
-          '但出线更难、外卡更容易。</p>';
+          '<p>初始评级也随层次分档，强校下限与上限同时更高：顶尖 1150–1600、一流 1000–1550、强势 850–1500、' +
+          '中坚 700–1420、新军 500–1320；自定义校沿用默认区间。新军跨度最大，但顶尖上限最高——' +
+          '强校更容易正面出线，新军则更难、外卡更容易。</p>';
         scroll.appendChild(sec);
       }, 30);
       return res;
