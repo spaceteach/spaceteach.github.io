@@ -477,6 +477,39 @@
     };
   }
 
+  // 建队初始评级按学校层次分档：强校下限高、区间窄；新军上下限都放开
+  var TIER_INITIAL = {
+    S: [1000, 1350], A: [900, 1400], B: [780, 1450],
+    C: [650, 1500], D: [500, 1550], INTL: [1000, 1350], X: [500, 1600]
+  };
+
+  function draftTier() {
+    var st = App && App.state;
+    var d = st && st.icpcSchoolDraft;
+    if (d && TIER_INITIAL[d.tier]) return d.tier;
+    var p = st && st.profile;
+    if (p && p.icpc && TIER_INITIAL[p.icpc.tier]) return p.icpc.tier;
+    return 'X';
+  }
+
+  function tierRange(tier) {
+    return TIER_INITIAL[tier] || TIER_INITIAL.X;
+  }
+
+  if (Rating && typeof Rating.initialRating === 'function') {
+    var origInitialRating = Rating.initialRating;
+    Rating.initialRating = function (rng) {
+      var cfg = V.CONFIG && V.CONFIG.rating ? V.CONFIG.rating : {};
+      var step = Number(cfg.initialStep) || 25;
+      var band = tierRange(draftTier());
+      var lo = Math.ceil(band[0] / step) * step;
+      var hi = Math.floor(band[1] / step) * step;
+      if (!rng || typeof rng.int !== 'function') return Math.round((lo + hi) / 2);
+      var roll = rng.int(lo / step, hi / step) * step;
+      return clamp(roll, Number(cfg.min) || 500, Number(cfg.max) || 4000);
+    };
+  }
+
   function findSchool(name) {
     var q = String(name || '').trim();
     if (ROSTER) {
@@ -873,7 +906,10 @@
           '欧美队伍未收录在公开抓取范围内。</p>' +
           '<p>网络预选赛未出线时，学校可申请外卡：按网络赛排名优先分配给尚未获得名额的高校。' +
           '顶尖高校名额多、外卡系数低；新军高校系数高，本校从未打进区域赛时另有 <b>×1.7</b> 优先。</p>' +
-          '<p>建队时选择的学校决定层次与外卡系数；层次越高，正规渠道晋级越容易，外卡越难。</p>';
+          '<p>建队时选择的学校决定层次与外卡系数；层次越高，正规渠道晋级越容易，外卡越难。</p>' +
+          '<p>初始评级也随层次分档：顶尖 1000–1350、一流 900–1400、强势 780–1450、中坚 650–1500、' +
+          '新军 500–1550（自定义校 500–1600）。强校下限高、波动小，新军可能极低也可能捡到天才，' +
+          '但出线更难、外卡更容易。</p>';
         scroll.appendChild(sec);
       }, 30);
       return res;
@@ -894,7 +930,9 @@
     if (!hint) return;
     var meta = App.state.icpcSchoolDraft;
     if (!meta) { hint.textContent = ''; return; }
+    var band = tierRange(meta.tier);
     hint.textContent = '层次：' + (TIER_LABEL[meta.tier] || '未收录') +
+      ' · 初始评级 ' + band[0] + '–' + band[1] +
       ' · 每校正式名额 ' + (TIER_QUOTA[meta.tier] || 1) + ' 支' +
       ' · 外卡系数 ×' + (TIER_FACTOR[meta.tier] || 1).toFixed(2) +
       '（本校从未打进区域赛时另有 ×1.7 优先）';
