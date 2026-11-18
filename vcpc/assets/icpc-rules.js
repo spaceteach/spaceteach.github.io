@@ -921,12 +921,17 @@
     return groups;
   }
 
+  var PICKED_NICK = {};
+
   function playerTeamLabel(meta) {
     if (!meta || !meta.name) return '';
     if (ROSTER) {
       var nicks = NICK_INDEX[meta.name];
       if (nicks && nicks.length) {
-        return realLabel(meta.name, nicks[Math.floor(Math.random() * nicks.length)]);
+        if (!PICKED_NICK[meta.name] || nicks.indexOf(PICKED_NICK[meta.name]) < 0) {
+          PICKED_NICK[meta.name] = nicks[Math.floor(Math.random() * nicks.length)];
+        }
+        return realLabel(meta.name, PICKED_NICK[meta.name]);
       }
     }
     return labelOf(meta, meta.tier, 1);
@@ -962,7 +967,11 @@
 
     var sel = wrap.querySelector('.icpc-school-select');
     var custom = wrap.querySelector('.icpc-school-custom');
-    sel.value = findSchool('北京大学') ? '北京大学' : (ROSTER ? ROSTER.schools[0] : '');
+    var prevDraft = App.state.icpcSchoolDraft;
+    var prevName = prevDraft && prevDraft.name;
+    var wanted = prevName && findSchool(prevName) ? prevName : null;
+    sel.value = wanted || (findSchool('北京大学') ? '北京大学' : (ROSTER ? ROSTER.schools[0] : ''));
+    if (!wanted && prevName && prevName !== sel.value) custom.value = prevName;
     var syncing = false;
     if (nameField) {
       nameField.addEventListener('input', function () {
